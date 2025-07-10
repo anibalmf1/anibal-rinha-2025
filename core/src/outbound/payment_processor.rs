@@ -1,6 +1,8 @@
 use reqwest::Client;
+use tracing::error;
 use crate::models::Payment;
 
+#[derive(Clone, Debug)]
 pub struct PaymentProcessor {
     client: Client,
     processor_url: String,
@@ -14,21 +16,32 @@ impl PaymentProcessor {
         }
     }
 
-    pub async fn process(self, payment: Payment) -> Result<(), String> {
-        let payload = serde_json::to_string(&payment).unwrap();
-
+    pub async fn process(self, payment: Payment) -> Result<String, String> {
         match self.client.post(&self.processor_url)
-            .json(&payload)
+            .json(&payment)
             .send()
             .await {
             Ok(res) => {
-                if res.status().is_success() {
-                    Ok(())
+                let status = res.status();
+                // Extract the payment processor header
+                let payment_processor = res.headers()
+                    .get("x-payment-processor")
+                    .and_then(|h| h.to_str().ok())
+                    .unwrap_or("default")
+                    .to_string();
+
+                if status.is_success() {
+                    Ok(payment_processor)
                 } else {
-                    Err(res.text().await.unwrap())
+                    let error = res.text().await.unwrap();
+                    error!("Error processing payment on payment_processor: {} - status: {}", error, status.as_str());
+                    Err(error)
                 }
             },
-            Err(e) => Err(e.to_string())
+            Err(e) => {
+                error!("Error processing payment on payment_processor: {}", e);
+                Err(e.to_string())
+            }
         }
     }
 }

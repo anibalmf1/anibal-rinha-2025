@@ -1,24 +1,29 @@
 use serde::{Deserialize, Serialize};
-use config::{Config,ConfigError};
+use config::{Case, Config};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Settings {
     pub server_url: String,
     pub server_port: u16,
-    pub nats_url: String,
-    pub payment_processor_default: String,
-    pub payment_processor_fallback: String,
+    pub redis_url: String,
+    pub payment_processor_url: String,
+    pub payment_topic: String,
+    pub db_host: String,
+    pub db_port: u16,
+    pub db_name: String,
+    pub db_user: String,
+    pub db_password: String,
 }
 
 impl Settings {
-    pub fn new() -> Result<Self, ConfigError> {
+    pub fn new() -> Self {
         let cfg = Config::builder()
             .add_source(config::Environment::with_prefix("APP")
-                .separator("_")
+                .convert_case(Case::Snake)
                 .try_parsing(true)
             )
-            .build()?;
+            .build().unwrap();
 
-        cfg.try_deserialize()
+        cfg.try_deserialize().unwrap()
     }
 }

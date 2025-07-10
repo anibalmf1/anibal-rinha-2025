@@ -22,18 +22,13 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-COPY --from=builder /usr/src/target/release/core .
+COPY --from=builder /usr/src/target/release/proxy .
 
 ENV APP_SERVER_URL=""
 ENV APP_SERVER_PORT=""
-ENV APP_REDIS_URL=""
-ENV APP_PAYMENT_PROCESSOR_URL=""
-ENV APP_PAYMENT_TOPIC=""
-ENV APP_DB_HOST=""
-ENV APP_DB_NAME=""
-ENV APP_DB_USER=""
-ENV APP_DB_PASSWORD=""
+ENV APP_PAYMENT_PROCESSOR_DEFAULT=""
+ENV APP_PAYMENT_PROCESSOR_FALLBACK=""
 
 EXPOSE ${APP_SERVER_PORT}
 
-CMD ["./core"]
+CMD ["./proxy"]

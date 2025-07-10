@@ -1,19 +1,23 @@
+extern crate core;
+
 mod config;
-mod message;
+mod queue;
 mod routes;
 mod usecases;
 mod models;
 mod outbound;
 mod consumers;
+mod store;
+mod serializers;
 
 use actix_web::{web, App, HttpServer};
 use std::io::{Result};
 use actix_web::middleware::Logger;
-use tracing::info;
+use tracing::{info};
 use tracing_subscriber::{fmt};
 
 use config::{Settings};
-use crate::message::{Producer,Consumer};
+use crate::queue::{Producer, Consumer};
 use crate::outbound::PaymentProcessor;
 use crate::usecases::UseCases;
 
@@ -23,19 +27,23 @@ async fn main() -> Result<()> {
     info!("Starting anibalmf1-rust server");
 
     let settings = Settings::new();
-    let producer= Producer::new(settings.clone()).await;
-    let consumer= Consumer::new(settings.clone()).await;
-    let payment_processor= PaymentProcessor::new(settings.payment_processor_url.clone()).await;
-    let usecases = UseCases::new(producer, payment_processor, settings.clone()).await;
+
+    let producer = Producer::new(settings.clone()).await;
+    let consumer = Consumer::new(settings.clone()).await;
+    let payment_processor = PaymentProcessor::new(settings.payment_processor_url.clone()).await;
+    let payment_store = store::PaymentStore::new(settings.clone()).await;
+    let usecases = UseCases::new(producer, payment_processor, payment_store).await;
     let payment_consumer = consumers::PaymentConsumer::new(usecases.clone()).await;
 
-    consumer.add_consumer(settings.payment_topic, payment_consumer).await;
+    // Start consuming messages from the queue
+    consumer.start_consuming(payment_consumer).await;
 
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
             .app_data(web::Data::new(usecases.clone()))
             .service(routes::process_payment)
+            .service(routes::get_summary)
     })
         .bind((settings.server_url.clone(), settings.server_port))?
         .run()
