@@ -5,9 +5,8 @@ use config::{Case, Config};
 pub struct Settings {
     pub server_url: String,
     pub server_port: u16,
-    pub nats_url: String,
-    pub payment_processor_url: String,
-    pub payment_topic: String,
+    pub payment_processor_default: String,
+    pub payment_processor_fallback: String,
 }
 
 impl Settings {

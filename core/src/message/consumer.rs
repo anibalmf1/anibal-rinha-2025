@@ -1,27 +1,32 @@
-use std::ops::Deref;
-use crate::config::settings::Settings;
+use async_trait::async_trait;
+use futures::StreamExt;
+use crate::config::Settings;
 
 pub struct Consumer {
-    nats: nats::Connection
+    nats: async_nats::Client
+}
+
+#[async_trait]
+pub trait ConsumerHandler: Send + Sync + 'static {
+    async fn consume(&self, message: String);
 }
 
 impl Consumer {
     pub async fn new(settings: Settings) -> Self {
-        let nats = nats::connect(settings.nats_url).await;
+        let nats = async_nats::connect(settings.nats_url).await.unwrap();
 
         Self {
             nats
         }
     }
 
-    pub async fn add_consumer(&self, topic: &str, consumer: fn(&str)) {
-        let sub = self.nats.subscribe(topic).unwrap();
+    pub async fn add_consumer(&self, topic: String, consumer: impl ConsumerHandler) {
+        let mut sub = self.nats.subscribe(topic).await.unwrap();
 
-        let _ = tokio::task::spawn_blocking(|| {
-            for msg in sub.messages() {
-                let str_message = String::from_utf8_lossy(&msg.data);
-                consumer(str_message.deref());
+        _ = tokio::spawn(async move {
+            while let Some(msg) = sub.next().await {
+                consumer.consume(String::from_utf8(msg.payload.to_vec()).unwrap()).await;
             }
-        });
+        })
     }
 }
