@@ -4,6 +4,7 @@ use crate::queue::QueueConsumerHandler;
 use crate::models::Payment;
 use crate::usecases::UseCases;
 
+#[derive(Clone)]
 pub struct PaymentConsumer{
     usecases: UseCases,
 }

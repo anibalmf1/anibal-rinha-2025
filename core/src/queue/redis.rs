@@ -3,6 +3,8 @@ use tracing::{info, error, warn};
 use serde::{Serialize, Deserialize};
 use crate::config::Settings;
 use crate::queue::{QueueConsumerHandler};
+use std::time::Duration;
+use std::num::NonZeroUsize;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct MessageWrapper {
@@ -79,6 +81,98 @@ pub struct Consumer {
     client: Client,
     queue_name: String,
     dlq_name: String,
+}
+
+pub struct DLQConsumer {
+    client: Client,
+    dlq_name: String,
+}
+
+impl DLQConsumer {
+    pub async fn new(settings: Settings) -> Self {
+        let redis_url = settings.redis_url.clone();
+        let topic = settings.payment_topic.clone();
+        let dlq_name = format!("{}_dlq", topic);
+
+        match Client::open(redis_url.clone()) {
+            Ok(client) => {
+                info!("Connected to Redis at {} for DLQ consumer", redis_url);
+                Self {
+                    client,
+                    dlq_name,
+                }
+            },
+            Err(e) => {
+                error!("Failed to connect to Redis at {}: {}", redis_url, e);
+                panic!("Failed to connect to Redis for DLQ consumer");
+            }
+        }
+    }
+
+    pub async fn start_consuming(&self, handler: impl QueueConsumerHandler) {
+        info!("Starting to consume messages from DLQ: {}", self.dlq_name);
+
+        let client = self.client.clone();
+        let dlq_name = self.dlq_name.clone();
+
+        tokio::spawn(async move {
+            let mut conn = client.get_async_connection().await.unwrap();
+
+            loop {
+                // Wait for 3 seconds before attempting to consume from DLQ
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                info!("Checking DLQ for messages: {}", dlq_name);
+
+                loop {
+                    // Use LPOP (non-blocking) to get the first message from the DLQ
+                    let result: redis::RedisResult<Option<String>> = conn.lpop(&dlq_name, Some(NonZeroUsize::new(1).unwrap())).await;
+
+                    match result {
+                        Ok(Some(serialized_wrapper)) => {
+                            // Deserialize the wrapped message
+                            let wrapper = match serde_json::from_str::<MessageWrapper>(&serialized_wrapper) {
+                                Ok(w) => w,
+                                Err(e) => {
+                                    error!("Failed to deserialize message wrapper from DLQ: {}", e);
+                                    break;
+                                }
+                            };
+
+                            info!("Processing message from DLQ (retry count: {})", wrapper.retry_count);
+
+                            // Process the original message
+                            match handler.consume(wrapper.message.clone()).await {
+                                Ok(_) => {
+                                    info!("DLQ message processed successfully, continuing to next message");
+                                    // Continue processing more messages
+                                },
+                                Err(e) => {
+                                    error!("Error processing message from DLQ: {}", e);
+
+                                    // Push the message back to the DLQ
+                                    if let Err(push_err) = conn.rpush::<_, _, ()>(&dlq_name, serialized_wrapper).await {
+                                        error!("Failed to push message back to DLQ {}: {}", dlq_name, push_err);
+                                    }
+
+                                    // Stop processing more messages until next cycle
+                                    break;
+                                }
+                            }
+                        },
+                        Ok(None) => {
+                            // No more messages in the DLQ
+                            info!("No more messages in DLQ");
+                            break;
+                        },
+                        Err(e) => {
+                            error!("Error receiving message from DLQ: {}", e);
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    }
 }
 
 impl Consumer {

@@ -7,4 +7,4 @@ pub trait QueueConsumerHandler: Send + Sync + 'static {
 
 mod redis;
 
-pub use redis::{Producer, Consumer};
+pub use redis::{Producer, Consumer, DLQConsumer};

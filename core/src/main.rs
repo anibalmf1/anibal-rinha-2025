@@ -17,7 +17,7 @@ use tracing::{info};
 use tracing_subscriber::{fmt};
 
 use config::{Settings};
-use crate::queue::{Producer, Consumer};
+use crate::queue::{Producer, Consumer, DLQConsumer};
 use crate::outbound::PaymentProcessor;
 use crate::usecases::UseCases;
 
@@ -34,9 +34,11 @@ async fn main() -> Result<()> {
     let payment_store = store::PaymentStore::new(settings.clone()).await;
     let usecases = UseCases::new(producer, payment_processor, payment_store).await;
     let payment_consumer = consumers::PaymentConsumer::new(usecases.clone()).await;
+    let dlq_consumer = DLQConsumer::new(settings.clone()).await;
 
     // Start consuming messages from the queue
-    consumer.start_consuming(payment_consumer).await;
+    consumer.start_consuming(payment_consumer.clone()).await;
+    dlq_consumer.start_consuming(payment_consumer).await;
 
     HttpServer::new(move || {
         App::new()
